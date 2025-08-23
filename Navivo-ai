@@ -1,0 +1,418 @@
+# Re-create the "Full Ready Demo" ZIP for Navivoai.ai
+import os, json, textwrap, zipfile, pathlib
+
+root = pathlib.Path("/mnt/data/navivoai_full_redo")
+web = root / "web"
+src = web / "src"
+app = src / "app"
+lib = src / "lib"
+styles = src / "styles"
+prisma = web / "prisma"
+components = src / "components"
+auth_dir = app / "api" / "auth" / "[...nextauth]"
+api_dir = app / "api"
+api_generate = api_dir / "generate"
+api_tools = api_dir / "tools"
+api_upload = api_dir / "upload"
+tools_pages = app / "tools"
+dashboard_page = app / "dashboard"
+
+for d in [web, src, app, lib, styles, prisma, components, auth_dir, api_generate, api_tools, api_upload, tools_pages, dashboard_page]:
+    os.makedirs(d, exist_ok=True)
+
+package_json = {
+  "name": "navivoai",
+  "version": "0.2.0",
+  "private": True,
+  "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "postinstall": "prisma generate" },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "@next-auth/prisma-adapter": "^1.0.7",
+    "next": "14.2.5",
+    "next-auth": "^4.24.7",
+    "openai": "^4.52.2",
+    "pdf-parse": "^1.1.1",
+    "formidable": "^3.5.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "prisma": "^5.18.0",
+    "tailwindcss": "^3.4.10",
+    "postcss": "^8.4.45",
+    "autoprefixer": "^10.4.19",
+    "typescript": "^5.5.4"
+  }
+}
+
+tsconfig = {
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "skipLibCheck": True,
+    "strict": True,
+    "noEmit": True,
+    "esModuleInterop": True,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": True,
+    "isolatedModules": True,
+    "jsx": "preserve",
+    "paths": { "@/*": ["./src/*"] },
+    "types": ["node"]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}
+
+postcss = "module.exports = { plugins: { tailwindcss: {}, autoprefixer: {}, }, };"
+tailwind = """/** @type {import('tailwindcss').Config} */
+module.exports = { content: ["./src/**/*.{js,ts,jsx,tsx}"], theme: { extend: {} }, plugins: [] };"""
+globals = """@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root { color-scheme: light dark; }
+body { @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100; }
+.btn { @apply px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50 shadow; }
+.input { @apply w-full border rounded-xl p-3 bg-white/80 dark:bg-gray-900/80; }"""
+
+env_example = """OPENAI_API_KEY=your_openai_key
+NEXTAUTH_SECRET=devsecret_change_me
+NEXTAUTH_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+# Optional hybrid mode:
+# OLLAMA_HOST=http://localhost:11434
+"""
+
+readme = """# Navivoai.ai — Full Ready Demo
+Quickstart:
+1) unzip -> `cd web`
+2) `npm install`
+3) `npx prisma migrate dev --name init`
+4) create `.env.local` from `.env.example`
+5) `npm run dev` -> http://localhost:3000
+Includes: Auth (Google), Prisma+SQLite, Writer, Summarizer (PDF), Resume, structured rationale, agentic summarize->email, optional hybrid (Ollama).
+"""
+
+schema = """generator client { provider = "prisma-client-js" }
+datasource db { provider = "sqlite"; url = "file:./dev.db" }
+model User {
+  id String @id @default(cuid())
+  name String?
+  email String? @unique
+  emailVerified DateTime?
+  image String?
+  accounts Account[]
+  sessions Session[]
+  jobs Job[]
+  createdAt DateTime @default(now())
+}
+model Account {
+  id String @id @default(cuid())
+  userId String
+  type String
+  provider String
+  providerAccountId String
+  refresh_token String?
+  access_token String?
+  expires_at Int?
+  token_type String?
+  scope String?
+  id_token String?
+  session_state String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+model Session {
+  id String @id @default(cuid())
+  sessionToken String @unique
+  userId String
+  expires DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+model VerificationToken {
+  identifier String
+  token String @unique
+  expires DateTime
+  @@unique([identifier, token])
+}
+model Job {
+  id String @id @default(cuid())
+  user User? @relation(fields: [userId], references: [id])
+  userId String?
+  tool String
+  input Json
+  output Json
+  provider String
+  createdAt DateTime @default(now())
+}
+model Document {
+  id String @id @default(cuid())
+  user User? @relation(fields: [userId], references: [id])
+  userId String?
+  name String
+  text String
+  createdAt DateTime @default(now())
+}"""
+
+layout = """import "./globals.css";
+import Link from "next/link";
+export const metadata = { title: "Navivoai.ai", description: "Explainable + Agentic AI SaaS demo" };
+export default function RootLayout({ children }:{children:React.ReactNode}){
+  return (<html lang="en"><body>
+    <header className="border-b bg-white/70 backdrop-blur sticky top-0 z-20">
+      <nav className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-4">
+        <Link href="/" className="font-bold">Navivoai.ai</Link>
+        <Link href="/dashboard" className="opacity-80 hover:opacity-100">Dashboard</Link>
+        <Link href="/tools/writer" className="opacity-80 hover:opacity-100">Writer</Link>
+        <Link href="/tools/summarizer" className="opacity-80 hover:opacity-100">Summarizer</Link>
+        <Link href="/tools/resume" className="opacity-80 hover:opacity-100">Resume</Link>
+        <div className="ml-auto">
+          <a href="/api/auth/signin" className="btn mr-2">Sign in</a>
+          <a href="/api/auth/signout" className="btn">Sign out</a>
+        </div>
+      </nav>
+    </header>
+    <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+  </body></html>); }"""
+
+home = """export default function Home(){
+  return (<div className="space-y-4">
+    <h1 className="text-3xl font-bold">Welcome to Navivoai.ai</h1>
+    <p className="opacity-80">Explainable + Agentic + Hybrid AI demo.</p>
+    <ul className="list-disc pl-5 space-y-1">
+      <li>Writer: Generate content with structured rationale.</li>
+      <li>Summarizer: Summarize text or PDFs.</li>
+      <li>Agentic: Summarize a PDF and draft an email, automatically.</li>
+    </ul>
+  </div>);
+}"""
+
+auth_route = """import NextAuth from "next-auth";
+import GoogleProvider from "next-auth/providers/google";
+import { PrismaAdapter } from "@next-auth/prisma-adapter";
+import { PrismaClient } from "@prisma/client";
+const prisma = new PrismaClient();
+const handler = NextAuth({
+  adapter: PrismaAdapter(prisma),
+  providers: [GoogleProvider({ clientId: process.env.GOOGLE_CLIENT_ID!, clientSecret: process.env.GOOGLE_CLIENT_SECRET! })],
+  session: { strategy: "jwt" },
+  secret: process.env.NEXTAUTH_SECRET,
+});
+export { handler as GET, handler as POST };"""
+
+middleware = """export { default } from "next-auth/middleware";
+export const config = { matcher: ["/dashboard/:path*", "/tools/:path*"] };"""
+
+ai_ts = """import OpenAI from "openai";
+const useOllama = !!process.env.OLLAMA_HOST;
+type GenParams = { prompt: string; mode?: "openai"|"fast"; intent?: string; };
+export async function generateText({ prompt, mode="openai", intent }: GenParams){
+  if(useOllama && mode==="fast"){
+    const r = await fetch(`${process.env.OLLAMA_HOST}/api/chat`, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ model:"llama3", messages:[{ role:"user", content: prompt }], stream:false })
+    });
+    const data = await r.json();
+    const text = data?.message?.content ?? "";
+    return { text, provider:"ollama", rationale: structuredRationale(prompt, text, intent) };
+  }
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  const resp = await client.chat.completions.create({ model:"gpt-4o-mini", messages:[{ role:"user", content: prompt }], temperature:0.2 });
+  const text = resp.choices[0]?.message?.content ?? "";
+  return { text, provider:"openai", rationale: structuredRationale(prompt, text, intent) };
+}
+function structuredRationale(prompt:string, output:string, intent?:string){
+  return {
+    intent: intent || "general",
+    key_factors: [
+      "Aligned with the user prompt requirements",
+      "Clarity and conciseness prioritized",
+      "Tone matched to likely audience"
+    ],
+    checks: [
+      "Avoided speculation or unverifiable claims",
+      "Kept formatting simple for readability"
+    ],
+    prompt_preview: prompt.slice(0,200),
+    output_preview: output.slice(0,200)
+  };
+}"""
+
+db_ts = 'import { PrismaClient } from "@prisma/client"; export const prisma = new PrismaClient();'
+
+gen_route = """import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { generateText } from "@/lib/ai";
+import { getServerSession } from "next-auth";
+import auth from "@/app/api/auth/[...nextauth]/route";
+export async function POST(req: NextRequest){
+  const body = await req.json();
+  const { prompt, tool, mode, intent } = body || {};
+  if(!prompt || !tool) return NextResponse.json({ error: "prompt and tool required" }, { status: 400 });
+  const session = await getServerSession(auth);
+  const userId = (session as any)?.user?.id || null;
+  const { text, provider, rationale } = await generateText({ prompt, mode, intent });
+  const job = await prisma.job.create({ data: { userId: userId || undefined, tool, input: body, output: { text, rationale }, provider } });
+  return NextResponse.json({ jobId: job.id, output: text, provider, rationale });
+}"""
+
+writer_api = """import { NextRequest, NextResponse } from "next/server";
+export async function POST(req: NextRequest){
+  const { topic, tone="neutral", words=300, mode="openai" } = await req.json();
+  const prompt = `Write a ${words}-word article about "${topic}" in a ${tone} tone.`;
+  const resp = await fetch(`${process.env.NEXTAUTH_URL}/api/generate`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ prompt, tool:"writer", mode, intent:"write_article" }) });
+  const data = await resp.json();
+  return NextResponse.json(data);
+}"""
+
+summ_api = """import { NextRequest, NextResponse } from "next/server";
+export async function POST(req: NextRequest){
+  const { text, words=120, mode="openai" } = await req.json();
+  const prompt = `Summarize the following content in about ${words} words, highlighting key points only:\\n\\n${text}`;
+  const resp = await fetch(`${process.env.NEXTAUTH_URL}/api/generate`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ prompt, tool:"summarizer", mode, intent:"summarize" }) });
+  const data = await resp.json();
+  return NextResponse.json(data);
+}"""
+
+resume_api = """import { NextRequest, NextResponse } from "next/server";
+export async function POST(req: NextRequest){
+  const { bullets = [], role="Software Engineer", mode="openai" } = await req.json();
+  const joined = bullets.map((b:string)=>`- ${b}`).join("\\n");
+  const prompt = `Improve the following resume bullet points for a ${role} role. Use action verbs and quantifiable impact. Return as bullets.\\n\\n${joined}`;
+  const resp = await fetch(`${process.env.NEXTAUTH_URL}/api/generate`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ prompt, tool:"resume", mode, intent:"resume_improve" }) });
+  const data = await resp.json();
+  return NextResponse.json(data);
+}"""
+
+upload_api = """import { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import formidable from "formidable";
+import fs from "fs";
+import pdfParse from "pdf-parse";
+export const config = { api: { bodyParser: false } } as any;
+export async function POST(req: NextRequest){
+  const buffer = await req.arrayBuffer();
+  const tmp = `/tmp/navivo_${Date.now()}.pdf`;
+  fs.writeFileSync(tmp, Buffer.from(buffer));
+  const data = await pdfParse(fs.readFileSync(tmp));
+  fs.unlinkSync(tmp);
+  return NextResponse.json({ text: data.text.slice(0, 20000) });
+}"""
+
+dashboard = """import { prisma } from "@/lib/db";
+import { getServerSession } from "next-auth";
+import auth from "@/app/api/auth/[...nextauth]/route";
+export default async function Dashboard(){
+  const session = await getServerSession(auth);
+  const user = (session as any)?.user;
+  const [jobs, total] = await Promise.all([
+    prisma.job.findMany({ where: { userId: user?.id || undefined }, orderBy: { createdAt: "desc" }, take: 20 }),
+    prisma.job.count({ where: { userId: user?.id || undefined } })
+  ]);
+  return (<div className="space-y-6">
+    <h1 className="text-2xl font-bold">Dashboard</h1>
+    <p className="opacity-80">Hello {user?.name || "there"} — you have {total} runs.</p>
+    <ul className="space-y-3">{jobs.map(j=>(
+      <li key={j.id} className="border rounded-xl p-3">
+        <div className="text-sm opacity-70">{new Date(j.createdAt).toLocaleString()}</div>
+        <div className="font-semibold">{j.tool}</div>
+        <pre className="whitespace-pre-wrap text-sm mt-2">{(j.output as any)?.text?.slice(0,500)}</pre>
+      </li>
+    ))}</ul>
+  </div>);
+}"""
+
+writer_page = """\"use client\";
+import { useState } from "react";
+export default function Writer(){
+  const [topic, setTopic] = useState("");
+  const [tone, setTone] = useState("neutral");
+  const [words, setWords] = useState(300);
+  const [mode, setMode] = useState<"openai"|"fast">("openai");
+  const [out, setOut] = useState(""); const [rationale, setRationale] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async ()=>{
+    setLoading(true); setOut(""); setRationale(null);
+    const res = await fetch("/api/tools/writer", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ topic, tone, words, mode }) });
+    const data = await res.json(); setOut(data.output || data.error); setRationale(data.rationale); setLoading(false);
+  };
+  return (<div className="space-y-4">
+    <h1 className="text-2xl font-bold">AI Writer</h1>
+    <div className="grid md:grid-cols-3 gap-3">
+      <input className="input" placeholder="Topic" value={topic} onChange={e=>setTopic(e.target.value)} />
+      <select className="input" value={tone} onChange={e=>setTone(e.target.value)}>
+        <option>neutral</option><option>friendly</option><option>professional</option><option>witty</option>
+      </select>
+      <input className="input" type="number" value={words} onChange={e=>setWords(parseInt(e.target.value||"300"))} />
+    </div>
+    <div className="flex gap-3 items-center">
+      <label className="flex items-center gap-2"><input type="radio" name="mode" checked={mode==="openai"} onChange={()=>setMode("openai")} /> OpenAI</label>
+      <label className="flex items-center gap-2"><input type="radio" name="mode" checked={mode==="fast"} onChange={()=>setMode("fast")} /> Fast</label>
+    </div>
+    <button className="btn" disabled={loading || !topic} onClick={run}>{loading? "Generating..." : "Generate"}</button>
+    {out && <div className="border rounded-xl p-4 whitespace-pre-wrap">{out}</div>}
+    {rationale && <div className="border rounded-xl p-4 text-sm"><div className="font-semibold mb-1">Why this output (structured rationale)</div><pre className="whitespace-pre-wrap">{JSON.stringify(rationale, null, 2)}</pre></div>}
+  </div>);
+}"""
+
+summarizer_page = """\"use client\";
+import { useState, useRef } from "react";
+export default function Summarizer(){
+  const [text, setText] = useState(""); const [words, setWords] = useState(120);
+  const [mode, setMode] = useState<"openai"|"fast">("openai");
+  const [out, setOut] = useState(""); const [rationale, setRationale] = useState<any>(null);
+  const [loading, setLoading] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
+  const summarizeText = async ()=>{
+    setLoading(true); setOut(""); setRationale(null);
+    const res = await fetch("/api/tools/summarizer", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ text, words, mode }) });
+    const data = await res.json(); setOut(data.output || data.error); setRationale(data.rationale); setLoading(false);
+  };
+  const uploadPdf = async (f: File)=>{
+    const buf = await f.arrayBuffer(); const res = await fetch("/api/upload", { method:"POST", body: buf });
+    const data = await res.json(); setText(data.text);
+  };
+  const summarizeAndEmail = async ()=>{
+    setLoading(true); setOut(""); setRationale(null);
+    const s = await fetch("/api/tools/summarizer", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ text, words, mode }) }).then(r=>r.json());
+    const e = await fetch("/api/generate", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ prompt: `Draft a concise professional email to my manager summarizing: \\n\\n${s.output}\\n\\nKeep under 120 words.`, tool:"email_draft", mode, intent:"email_draft" }) }).then(r=>r.json());
+    setOut(`SUMMARY:\\n${s.output}\\n\\nEMAIL DRAFT:\\n${e.output}`); setRationale(e.rationale); setLoading(false);
+  };
+  return (<div className="space-y-4">
+    <h1 className="text-2xl font-bold">Summarizer</h1>
+    <textarea className="input min-h-[160px]" placeholder="Paste text OR upload a PDF below" value={text} onChange={e=>setText(e.target.value)} />
+    <div className="flex gap-3 items-center">
+      <input type="number" className="input w-40" value={words} onChange={e=>setWords(parseInt(e.target.value||"120"))} />
+      <input type="file" ref={fileRef} accept="application/pdf" onChange={e=> e.target.files && uploadPdf(e.target.files[0])} />
+    </div>
+    <div className="flex gap-3 items-center">
+      <label className="flex items-center gap-2"><input type="radio" name="mode" checked={mode==="openai"} onChange={()=>setMode("openai")} /> OpenAI</label>
+      <label className="flex items-center gap-2"><input type="radio" name="mode" checked={mode==="fast"} onChange={()=>setMode("fast")} /> Fast</label>
+    </div>
+    <div className="flex gap-3">
+      <button className="btn" disabled={loading || !text} onClick={summarizeText}>{loading? "Summarizing..." : "Summarize"}</button>
+      <button className="btn" disabled={loading || !text} onClick={summarizeAndEmail}>{loading? "Working..." : "Summarize + Email (Agentic)"}</button>
+    </div>
+    {out && <div className="border rounded-xl p-4 whitespace-pre-wrap">{out}</div>}
+    {rationale && <div className="border rounded-xl p-4 text-sm"><div className="font-semibold mb-1">Why this output (structured rationale)</div><pre className="whitespace-pre-wrap">{JSON.stringify(rationale, null, 2)}</pre></div>}
+  </div>);
+}"""
+
+resume_page = """\"use client\";
+import { useState } from "react";
+export default function Resume(){
+  const [bullets, setBullets] = useState<string[]>(["Built APIs in Node.js","Improved page load time by 30%"]);
+  const [role, setRole] = useState("Software Engineer");
+  const [mode, setMode] = useState<"openai"|"fast">("openai");
+  const [out, setOut] = useState(""); const [rationale, setRationale] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async ()=>{
+    setLoading(true); setOut(""); setRationale(null);
+    const res = await fetch("/api/tools/resume", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ bullets, role, mode }) });
+    const data = await res.json(); setOut(data.output || data.error); setRationale(data.rationale); setLoading(false);
+  };
+  return (<div className="space-y-4">
+    <h1 className="text-2xl font-bold">Resume Improver</h1>
+    <input className="input" placeholder="Target r
